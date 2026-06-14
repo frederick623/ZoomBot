@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- App Sandbox (required by Mac App Store; keeps the app contained) -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!-- Microphone access – needed for RPScreenRecorder audio capture -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <!-- Screen recording – needed for RPScreenRecorder video capture -->
+    <key>com.apple.security.screencapture</key>
+    <true/>
+
+    <!-- Read+write access to user-chosen files/folders (Save panels, etc.) -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+</dict>
+</plist>
