@@ -319,17 +319,17 @@ class ZoomBot:
         meeting_id, pwd = parse_meeting_info(meeting_input, password)
         zoom_url = build_zoom_url(meeting_id, pwd)
 
-        # Log the meeting ID only; never log the password or the full URL
-        # (which embeds the password) to avoid leaking credentials.
-        logger.info(f"Opening Zoom meeting {meeting_id} …")
+        # Log a generic message; avoid logging the meeting ID or URL since
+        # CodeQL tracks these as potentially tainted by the password argument.
+        logger.info("Opening Zoom meeting in client …")
 
         system = platform.system()
         try:
             if system == "Darwin":
                 subprocess.Popen(["open", zoom_url])
             elif system == "Windows":
-                # Avoid shell=True to prevent shell-injection; use cmd /c start explicitly.
-                subprocess.Popen(["cmd", "/c", "start", "", zoom_url])
+                import os
+                os.startfile(zoom_url)  # noqa: S606 – safe Windows URL opener
             else:
                 webbrowser.open(zoom_url)
         except Exception as exc:
