@@ -319,20 +319,22 @@ class ZoomBot:
         meeting_id, pwd = parse_meeting_info(meeting_input, password)
         zoom_url = build_zoom_url(meeting_id, pwd)
 
+        # Log the meeting ID only; never log the password or the full URL
+        # (which embeds the password) to avoid leaking credentials.
         logger.info(f"Opening Zoom meeting {meeting_id} …")
-        logger.info(f"Launch URL: {zoom_url}")
 
         system = platform.system()
         try:
             if system == "Darwin":
                 subprocess.Popen(["open", zoom_url])
             elif system == "Windows":
-                subprocess.Popen(["start", zoom_url], shell=True)
+                # Avoid shell=True to prevent shell-injection; use cmd /c start explicitly.
+                subprocess.Popen(["cmd", "/c", "start", "", zoom_url])
             else:
                 webbrowser.open(zoom_url)
         except Exception as exc:
             logger.warning(f"Could not open Zoom URL automatically: {exc}")
-            logger.info(f"Please open this URL manually: {zoom_url}")
+            logger.info("Please open the Zoom meeting manually and then start capture.")
 
         # Give the Zoom client a moment to launch and join the meeting.
         logger.info("Waiting for Zoom to launch (10 s) …")
