@@ -19,6 +19,10 @@ import logging
 import platform
 import torch
 from tqdm import tqdm
+import re
+import subprocess
+import webbrowser
+from urllib.parse import urlparse, parse_qs, urlencode
 
 # Configure logging
 logging.basicConfig(
@@ -26,6 +30,52 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def parse_meeting_info(meeting_input: str, password: str = "") -> tuple[str, str]:
+    """
+    Extract (meeting_id, password) from a Zoom meeting URL or bare meeting ID.
+
+    Supports:
+    - https://zoom.us/j/<meeting_id>?<query_params>
+    - https://<account>.zoom.us/j/<meeting_id>
+    - Bare numeric IDs such as "123 456 7890" or "12345678901"
+
+    Returns:
+        (meeting_id, password) – password may be empty.
+    """
+    meeting_input = meeting_input.strip()
+    pwd = password.strip()
+
+    # Try to parse as a URL (add scheme if missing so urlparse works).
+    url_str = meeting_input if meeting_input.startswith("http") else f"https://{meeting_input}"
+    parsed = urlparse(url_str)
+    if parsed.hostname and "zoom.us" in parsed.hostname:
+        path_parts = [p for p in parsed.path.split("/") if p]
+        if len(path_parts) >= 2 and path_parts[0] == "j":
+            meeting_id = path_parts[1].strip()
+            if not pwd:
+                qs = parse_qs(parsed.query)
+                pwd = qs.get("pwd", [""])[0]
+            return meeting_id, pwd
+
+    # Fall back: strip non-digits and treat the result as a bare meeting ID.
+    digits = re.sub(r"\D", "", meeting_input)
+    if 9 <= len(digits) <= 11:
+        return digits, pwd
+
+    raise ValueError(
+        f"Could not extract a meeting ID from: {meeting_input!r}. "
+        "Provide a full Zoom URL or a 9–11 digit meeting ID."
+    )
+
+
+def build_zoom_url(meeting_id: str, password: str = "") -> str:
+    """Return a zoommtg:// deep-link URL for opening Zoom directly."""
+    params = {"action": "join", "confno": meeting_id}
+    if password:
+        params["pwd"] = password
+    return f"zoommtg://zoom.us/join?{urlencode(params)}"
 
 
 class SceneDetector:
@@ -250,31 +300,46 @@ class ZoomBot:
         self.audio_recorder = AudioRecorder(self.audio_dir)
         self.screenshot_count = 0
         
-    def join_meeting(self, meeting_url: str, bot_name: str = "Recording Bot"):
+    def join_meeting(self, meeting_input: str, password: str = "", bot_name: str = "Recording Bot"):
         """
-        Join Zoom meeting and start recording
-        
-        Note: This is a placeholder for actual Zoom SDK integration.
-        You'll need to implement this using:
-        - Zoom Meeting SDK (requires SDK credentials)
-        - Or a service like Recall.ai API
-        
+        Open a Zoom meeting in the installed Zoom client, then start the
+        recording session (audio capture + Whisper transcription).
+
+        The meeting is launched via the ``zoommtg://`` URL scheme so that the
+        desktop Zoom app handles authentication and entry.  Once Zoom is open
+        the existing audio/video capture pipeline begins automatically.
+
         Args:
-            meeting_url: Zoom meeting URL or ID
-            bot_name: Display name for the bot
+            meeting_input: Zoom meeting URL (https://zoom.us/j/…) or bare
+                           meeting ID (9–11 digits, spaces allowed).
+            password:      Meeting passcode (optional; also extracted from URL).
+            bot_name:      Display name shown in the meeting (unused when
+                           launching via URL scheme – set in Zoom preferences).
         """
-        logger.warning("join_meeting() is a placeholder - implement with Zoom SDK")
-        logger.info(f"Would join meeting: {meeting_url} as '{bot_name}'")
-        
-        # In real implementation, this would:
-        # 1. Parse meeting URL to extract meeting ID and password
-        # 2. Initialize Zoom SDK
-        # 3. Join meeting with bot credentials
-        # 4. Set up video/audio stream callbacks
-        
-        raise NotImplementedError(
-            "Zoom SDK integration required. See setup instructions."
-        )
+        meeting_id, pwd = parse_meeting_info(meeting_input, password)
+        zoom_url = build_zoom_url(meeting_id, pwd)
+
+        logger.info(f"Opening Zoom meeting {meeting_id} …")
+        logger.info(f"Launch URL: {zoom_url}")
+
+        system = platform.system()
+        try:
+            if system == "Darwin":
+                subprocess.Popen(["open", zoom_url])
+            elif system == "Windows":
+                subprocess.Popen(["start", zoom_url], shell=True)
+            else:
+                webbrowser.open(zoom_url)
+        except Exception as exc:
+            logger.warning(f"Could not open Zoom URL automatically: {exc}")
+            logger.info(f"Please open this URL manually: {zoom_url}")
+
+        # Give the Zoom client a moment to launch and join the meeting.
+        logger.info("Waiting for Zoom to launch (10 s) …")
+        time.sleep(10)
+
+        logger.info("Starting recording session …")
+        self.start_session()
         
     def process_video_frame(self, frame: np.ndarray):
         """
@@ -407,7 +472,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Zoom Meeting Bot")
     parser.add_argument("-v", "--video", help="Process video file (screenshots + transcription)")
     parser.add_argument("-a", "--audio", help="Process audio file (m4a transcription only)")
-    parser.add_argument("-z", "--zoom", help="Zoom meeting URL to join")
+    parser.add_argument("-z", "--zoom", help="Zoom meeting URL or ID to join")
+    parser.add_argument("-p", "--password", default="", help="Zoom meeting password/passcode")
     parser.add_argument("--output", default="output", help="Output directory")
 
     args = parser.parse_args()
@@ -419,12 +485,12 @@ if __name__ == "__main__":
         bot = DemoBot(output_dir=args.output)
         bot.process_audio_file(args.audio)
     elif args.zoom:
-        # Real Zoom meeting mode (requires SDK setup)
         bot = ZoomBot(output_dir=args.output)
         try:
-            bot.join_meeting(args.meeting_url)
-        except NotImplementedError as e:
+            bot.join_meeting(args.zoom, args.password)
+        except ValueError as e:
             logger.error(str(e))
-            logger.info("See README.md for Zoom SDK setup instructions")
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
     else:
         parser.print_help()
