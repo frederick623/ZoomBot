@@ -10,6 +10,33 @@ struct ContentView: View {
             Text("Live Captions")
                 .font(.title2).bold()
 
+            // MARK: – Meeting input
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Join Zoom Meeting")
+                        .font(.headline)
+
+                    TextField("Meeting link or ID (e.g. https://zoom.us/j/123… or 123 456 789)", text: $vm.meetingLink)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(vm.isRunning || vm.isTranscribingFile)
+
+                    SecureField("Password (if required)", text: $vm.meetingPassword)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(vm.isRunning || vm.isTranscribingFile)
+
+                    Button {
+                        vm.joinMeeting()
+                    } label: {
+                        Label("Join & Transcribe", systemImage: "video.badge.plus")
+                    }
+                    .buttonStyle(CustomHeightButtonStyle())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .disabled(vm.meetingLink.trimmingCharacters(in: .whitespaces).isEmpty
+                              || vm.isRunning || vm.isTranscribingFile)
+                }
+                .padding(4)
+            }
+
             ScrollView {
                 if vm.transcript.isEmpty {
                     Text("Captions will appear here...")

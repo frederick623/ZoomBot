@@ -9,12 +9,80 @@ final class MeetingViewModel: ObservableObject {
     @Published var isRunning: Bool = false
     @Published var isTranscribingFile: Bool = false
     @Published var statusText: String = "Idle"
+    @Published var meetingLink: String = ""
+    @Published var meetingPassword: String = ""
 
     private var session: MeetingSessionController?
     private var engine: WhisperEngine?
 
     init() {
         setupSession()
+    }
+
+    // MARK: - Zoom meeting join
+
+    func joinMeeting() {
+        let link = meetingLink.trimmingCharacters(in: .whitespaces)
+        guard !link.isEmpty else {
+            statusText = "Enter a meeting link or ID"
+            return
+        }
+        guard let zoomURL = buildZoomURL(from: link, password: meetingPassword) else {
+            statusText = "Invalid meeting link or ID"
+            return
+        }
+        NSWorkspace.shared.open(zoomURL)
+        statusText = "Joining meeting…"
+        // Give Zoom time to launch and show the meeting window, then start capture.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            self.start()
+        }
+    }
+
+    /// Build a `zoommtg://` deep-link URL from a Zoom meeting link or bare meeting ID.
+    private func buildZoomURL(from input: String, password: String) -> URL? {
+        let trimmed = input.trimmingCharacters(in: .whitespaces)
+        var meetingID: String?
+        var pwd = password.trimmingCharacters(in: .whitespaces)
+
+        // Try parsing as a URL (with or without scheme).
+        let urlString = trimmed.hasPrefix("http") ? trimmed : "https://\(trimmed)"
+        if let url = URL(string: urlString),
+           let host = url.host, host.contains("zoom.us") {
+            let components = url.pathComponents
+            if let jIdx = components.firstIndex(of: "j"), jIdx + 1 < components.count {
+                meetingID = components[jIdx + 1]
+            }
+            // Pull embedded password from the URL query string if the user didn't supply one.
+            if pwd.isEmpty,
+               let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems {
+                pwd = queryItems.first(where: { $0.name == "pwd" })?.value ?? ""
+            }
+        }
+
+        // Fall back: treat the input as a bare numeric meeting ID (9–11 digits).
+        if meetingID == nil {
+            let digits = trimmed.filter(\.isNumber)
+            if (9...11).contains(digits.count) {
+                meetingID = digits
+            }
+        }
+
+        guard let id = meetingID else { return nil }
+
+        var urlComponents = URLComponents()
+        urlComponents.scheme = "zoommtg"
+        urlComponents.host = "zoom.us"
+        urlComponents.path = "/join"
+        var queryItems = [
+            URLQueryItem(name: "action", value: "join"),
+            URLQueryItem(name: "confno", value: id)
+        ]
+        if !pwd.isEmpty {
+            queryItems.append(URLQueryItem(name: "pwd", value: pwd))
+        }
+        urlComponents.queryItems = queryItems
+        return urlComponents.url
     }
 
     func start() {
